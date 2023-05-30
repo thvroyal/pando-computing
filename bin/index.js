@@ -25,12 +25,19 @@ var sync = require("pull-sync");
 var toPull = require("stream-to-pull-stream");
 var limit = require("pull-limit");
 const portfinder = require("portfinder");
-
 var duplexWs = require("pull-ws");
+var AWS = require("aws-sdk");
+
+AWS.config.update({
+  region: 'ap-southeast-2',
+  accessKeyId: 'AKIAV6JUFBZ7HTPRPCRR',
+  secretAcesssKey: '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'
+})
+const dynamoDB = new AWS.DynamoDB.DocumentClient();
 
 // var args = parse(process.argv.slice(2));
 
-var wrtc = electronWebRTC({ headless: false });
+var wrtc = electronWebRTC({ headless: true });
 
 function getIPAddresses() {
   var ifaces = os.networkInterfaces();
@@ -68,6 +75,7 @@ class Project {
   constructor({
     port,
     module,
+    id,
     items = [],
     secret = "INSECURE-SECRET",
     seed = null,
@@ -101,279 +109,339 @@ class Project {
     this.syncStdio = syncStdio;
     this.statusSocket = null;
     this.wsVolunteersStatus = {};
-  }
-
-  start = () => {
-    bundle(this.module, (err, bundlePath) => {
-      if (err) {
-        console.error(err);
-        process.exit(1);
-      }
-
-      const _this = this;
-
-      log("creating bootstrap server");
-      var publicDir = path.join(__dirname, "../local-server/public");
-      mkdirp.sync(publicDir);
-      this.server = new Server({
-        secret: this.secret,
-        publicDir: publicDir,
-        port: this.port,
-        seed: this.seed,
-      });
-      this.host = "localhost:" + this.port;
-
-      this.server._bootstrap.upgrade("/volunteer", (ws) => {
-        if (this.processor) {
-          log("volunteer connected over WebSocket");
-
-          ws.isAlive = true;
-          var heartbeat = setInterval(function ping() {
-            if (ws.isAlive === false) {
-              logHeartbeat("ws: volunteer connection lost");
-              return ws.terminate();
-            }
-            ws.isAlive = false;
-            ws.ping(function () {});
-          }, this.heartbeat);
-          ws.addEventListener("close", function () {
-            clearInterval(heartbeat);
-            heartbeat = null;
-          });
-          ws.addEventListener("error", function () {
-            clearInterval(heartbeat);
-            heartbeat = null;
-          });
-          ws.addEventListener("pong", function () {
-            logHeartbeat("ws: volunteer connection pong");
-            ws.isAlive = true;
-          });
-
-          this.processor.lendStream(function (err, stream) {
-            if (err) return log("error lender sub-stream to volunteer: " + err);
-            log("lending sub-stream to volunteer");
-
-            pull(
-              stream,
-              probe("volunteer-input"),
-              limit(duplexWs(ws), _this.batchSize),
-              probe("volunteer-output"),
-              stream
-            );
-          });
-        }
-      });
-
-      this.server._bootstrap.upgrade("/volunteer-monitoring", (ws) => {
-        log("volunteer monitoring connected over WebSocket");
-
-        ws.isAlive = true;
-        var heartbeat = setInterval(function ping() {
-          if (ws.isAlive === false) {
-            logHeartbeat("ws: volunteer monitoring connection lost");
-            return ws.terminate();
+    this.id = id;
+  
+    this.start = () => {
+        bundle(this.module, (err, bundlePath) => {
+          if (err) {
+            console.error(err);
+            process.exit(1);
           }
-          ws.isAlive = false;
-          ws.ping(function () {});
-        }, args.heartbeat);
-        ws.addEventListener("close", function () {
-          clearInterval(heartbeat);
-          heartbeat = null;
-        });
-        ws.addEventListener("error", function () {
-          clearInterval(heartbeat);
-          heartbeat = null;
-        });
-        ws.addEventListener("pong", function () {
-          logHeartbeat("ws: volunteer monitoring pong");
-          ws.isAlive = true;
-        });
 
-        var id = null;
-        var lastReportTime = new Date();
-        pull(
-          duplexWs.source(ws),
-          pull.drain(
-            function (data) {
-              var info = JSON.parse(data);
-              id = info.id;
-              var time = new Date();
-              this.wsVolunteersStatus[info.id] = {
-                id: info.id,
-                timestamp: time,
-                lastReportInterval: time - lastReportTime,
-                performance: info,
-              };
-              lastReportTime = time;
-            },
-            function () {
-              if (id) {
-                delete this.wsVolunteersStatus[id];
-              }
+          const _this = this;
+
+          log("creating bootstrap server");
+          var publicDir = path.join(__dirname, "../local-server/public");
+          mkdirp.sync(publicDir);
+          this.server = new Server({
+            secret: this.secret,
+            publicDir: publicDir,
+            port: this.port,
+            seed: this.seed,
+          });
+          this.host = "localhost:" + this.port;
+
+          this.server._bootstrap.upgrade("/volunteer", (ws) => {
+            if (this.processor) {
+              log("volunteer connected over WebSocket");
+
+              ws.isAlive = true;
+              var heartbeat = setInterval(function ping() {
+                if (ws.isAlive === false) {
+                  logHeartbeat("ws: volunteer connection lost");
+                  return ws.terminate();
+                }
+                ws.isAlive = false;
+                ws.ping(function () {});
+              }, this.heartbeat);
+              ws.addEventListener("close", function () {
+                clearInterval(heartbeat);
+                heartbeat = null;
+              });
+              ws.addEventListener("error", function () {
+                clearInterval(heartbeat);
+                heartbeat = null;
+              });
+              ws.addEventListener("pong", function () {
+                logHeartbeat("ws: volunteer connection pong");
+                ws.isAlive = true;
+              });
+
+              this.processor.lendStream(function (err, stream) {
+                if (err) return log("error lender sub-stream to volunteer: " + err);
+                log("lending sub-stream to volunteer");
+
+                pull(
+                  stream,
+                  probe("volunteer-input"),
+                  limit(duplexWs(ws), _this.batchSize),
+                  probe("volunteer-output"),
+                  stream
+                );
+              });
             }
-          )
-        );
-      });
-
-      getIPAddresses().forEach((addr) => {
-        console.error(
-          "Serving volunteer code at http://" + addr + ":" + this.port
-        );
-      });
-
-      log("Serializing configuration for workers");
-      fs.writeFileSync(
-        path.join(__dirname, "../public/config.js"),
-        "window.pando = { config: " +
-          JSON.stringify({
-            batchSize: this.batchSize,
-            degree: this.degree,
-            globalMonitoring: this.globalMonitoring,
-            iceServers: this.iceServers,
-            reportingInterval: this.reportingInterval * 1000,
-            requestTimeoutInMs: this.bootstrapTimeout * 1000,
-            version: "1.0.0",
-          }) +
-          " }"
-      );
-
-      log("Uploading files to " + this.host + " with secret " + this.secret);
-      website.upload(
-        [
-          bundlePath,
-          path.join(__dirname, "../public/config.js"),
-          path.join(__dirname, "../public/index.html"),
-          path.join(__dirname, "../public/volunteer.js"),
-          path.join(__dirname, "../public/simplewebsocket.min.js"),
-          path.join(
-            __dirname,
-            "../node_modules/bootstrap/dist/css/bootstrap.min.css"
-          ),
-          path.join(
-            __dirname,
-            "../node_modules/bootstrap/dist/js/bootstrap.min.js"
-          ),
-          path.join(__dirname, "../node_modules/jquery/jquery.min.js"),
-          path.join(
-            __dirname,
-            "../node_modules/popper.js/dist/umd/popper.min.js"
-          ),
-        ],
-        this.host,
-        this.secret,
-        (err) => {
-          if (err) throw err;
-          log("files uploaded successfully");
-
-          log("connecting to bootstrap server");
-          var bootstrap = new BootstrapClient(this.host);
-
-          log("creating root node");
-          var root = new Node(bootstrap, {
-            requestTimeoutInMs: this.bootstrapTimeout * 1000, // ms
-            peerOpts: {
-              wrtc: wrtc,
-              config: { iceServers: this.iceServers },
-            },
-            maxDegree: this.degree,
-          }).becomeRoot(this.secret);
-
-          this.processor = createProcessor(root, {
-            batchSize: this.batchSize,
-            bundle: !this.startIdle
-              ? require(bundlePath)["/pando/1.0.0"]
-              : function (x, cb) {
-                  console.error(
-                    "Internal error, bundle should not have been executed"
-                  );
-                },
-            globalMonitoring: this.globalMonitoring,
-            reportingInterval: this.reportingInterval * 1000, // ms
-            startProcessing: !this.startIdle,
           });
 
-          this.processor.on("status", function (rootStatus) {
-            var volunteers = {};
+          this.server._bootstrap.upgrade("/volunteer-monitoring", (ws) => {
+            log("volunteer monitoring connected over WebSocket");
 
-            // Adding volunteers connected over WebSockets
-            for (var id in _this.wsVolunteersStatus) {
-              volunteers[id] = _this.wsVolunteersStatus[id];
-            }
-
-            // Adding volunteers connected over WebRTC
-            for (var id in rootStatus.children) {
-              volunteers[id] = rootStatus.children[id];
-            }
-
-            var status = JSON.stringify({
-              root: rootStatus,
-              volunteers: volunteers,
-              timestamp: new Date(),
+            ws.isAlive = true;
+            var heartbeat = setInterval(function ping() {
+              if (ws.isAlive === false) {
+                logHeartbeat("ws: volunteer monitoring connection lost");
+                return ws.terminate();
+              }
+              ws.isAlive = false;
+              ws.ping(function () {});
+            }, args.heartbeat);
+            ws.addEventListener("close", function () {
+              clearInterval(heartbeat);
+              heartbeat = null;
+            });
+            ws.addEventListener("error", function () {
+              clearInterval(heartbeat);
+              heartbeat = null;
+            });
+            ws.addEventListener("pong", function () {
+              logHeartbeat("ws: volunteer monitoring pong");
+              ws.isAlive = true;
             });
 
-            logMonitoring(status);
-            logMonitoringChildren(
-              "children nb: " +
-                rootStatus.childrenNb +
-                " leaf nb: " +
-                rootStatus.nbLeafNodes
+            var id = null;
+            var lastReportTime = new Date();
+            pull(
+              duplexWs.source(ws),
+              pull.drain(
+                function (data) {
+                  var info = JSON.parse(data);
+                  id = info.id;
+                  var time = new Date();
+                  this.wsVolunteersStatus[info.id] = {
+                    id: info.id,
+                    timestamp: time,
+                    lastReportInterval: time - lastReportTime,
+                    performance: info,
+                  };
+                  lastReportTime = time;
+                },
+                function () {
+                  if (id) {
+                    delete this.wsVolunteersStatus[id];
+                  }
+                }
+              )
             );
-
-            if (_this.statusSocket) {
-              log("sending status to monitoring page");
-              _this.statusSocket.send(status);
-            }
           });
 
-          const close = () => {
-            log("closing");
-            if (this.server) {
-              this.server.close();
-            }
-            if (root) root.close();
-            if (bootstrap) bootstrap.close();
-            if (wrtc) wrtc.close();
-            if (this.processor) this.processor.close();
-          }
+          getIPAddresses().forEach((addr) => {
+            console.error(
+              "Serving volunteer code at http://" + addr + ":" + this.port
+            );
+          });
 
-          var io = {
-            source: this.items,
-            sink: pull.drain(
-              function (x) {
-                process.stdout.write(String(x) + "\n");
-              },
-              function (err) {
-                log("drain:done(" + err + ")");
-                if (err) {
-                  console.error(err.message);
-                  console.error(err);
-                  close();
-                  process.exit(1);
-                } else {
-                  close();
-                  process.exit(0);
-                }
-              }
-            ),
-          };
-
-          if (this.syncStdio) {
-            io = sync(io);
-          }
-
-          pull(
-            io,
-            pull.through(log),
-            probe("pando:input"),
-            this.processor,
-            probe("pando:result"),
-            pull.through(log),
-            io
+          log("Serializing configuration for workers");
+          fs.writeFileSync(
+            path.join(__dirname, "../public/config.js"),
+            "window.pando = { config: " +
+              JSON.stringify({
+                batchSize: this.batchSize,
+                degree: this.degree,
+                globalMonitoring: this.globalMonitoring,
+                iceServers: this.iceServers,
+                reportingInterval: this.reportingInterval * 1000,
+                requestTimeoutInMs: this.bootstrapTimeout * 1000,
+                version: "1.0.0",
+              }) +
+              " }"
           );
-        }
-      );
-    });
-  };
+
+          log("Uploading files to " + this.host + " with secret " + this.secret);
+          website.upload(
+            [
+              bundlePath,
+              path.join(__dirname, "../public/config.js"),
+              path.join(__dirname, "../public/index.html"),
+              path.join(__dirname, "../public/volunteer.js"),
+              path.join(__dirname, "../public/simplewebsocket.min.js"),
+              path.join(
+                __dirname,
+                "../node_modules/bootstrap/dist/css/bootstrap.min.css"
+              ),
+              path.join(
+                __dirname,
+                "../node_modules/bootstrap/dist/js/bootstrap.min.js"
+              ),
+              path.join(__dirname, "../node_modules/jquery/jquery.min.js"),
+              path.join(
+                __dirname,
+                "../node_modules/popper.js/dist/umd/popper.min.js"
+              ),
+            ],
+            this.host,
+            this.secret,
+            (err) => {
+              if (err) throw err;
+              log("files uploaded successfully");
+
+              log("connecting to bootstrap server");
+              var bootstrap = new BootstrapClient(this.host);
+
+              log("creating root node");
+              var root = new Node(bootstrap, {
+                requestTimeoutInMs: this.bootstrapTimeout * 1000, // ms
+                peerOpts: {
+                  wrtc: wrtc,
+                  config: { iceServers: this.iceServers },
+                },
+                maxDegree: this.degree,
+              }).becomeRoot(this.secret);
+
+              this.processor = createProcessor(root, {
+                batchSize: this.batchSize,
+                bundle: !this.startIdle
+                  ? require(bundlePath)["/pando/1.0.0"]
+                  : function (x, cb) {
+                      console.error(
+                        "Internal error, bundle should not have been executed"
+                      );
+                    },
+                globalMonitoring: this.globalMonitoring,
+                reportingInterval: this.reportingInterval * 1000, // ms
+                startProcessing: !this.startIdle,
+              });
+
+              this.processor.on("status", function (rootStatus) {
+                var volunteers = {};
+
+                // Adding volunteers connected over WebSockets
+                for (var id in _this.wsVolunteersStatus) {
+                  volunteers[id] = _this.wsVolunteersStatus[id];
+                }
+
+                // Adding volunteers connected over WebRTC
+                for (var id in rootStatus.children) {
+                  volunteers[id] = rootStatus.children[id];
+                }
+
+                var status = JSON.stringify({
+                  root: rootStatus,
+                  volunteers: volunteers,
+                  timestamp: new Date(),
+                });
+
+                logMonitoring(status);
+                logMonitoringChildren(
+                  "children nb: " +
+                    rootStatus.childrenNb +
+                    " leaf nb: " +
+                    rootStatus.nbLeafNodes
+                );
+
+                if (_this.statusSocket) {
+                  log("sending status to monitoring page");
+                  _this.statusSocket.send(status);
+                }
+              });
+
+              const close = () => {
+                log("closing");
+                if (this.server) {
+                  this.server.close();
+                }
+                if (root) root.close();
+                if (bootstrap) bootstrap.close();
+                if (wrtc) wrtc.close();
+                if (this.processor) this.processor.close();
+              }
+
+              const getItemParams = {
+                TableName: 'Record',
+                Key: {
+                  ProjectId: this.id
+                }
+              };
+
+              function toggleCreate(that) {
+                const params = {
+                  TableName: 'Record',
+                  Item: {
+                    ProjectId: that.id,
+                    Output: [],
+                  },
+                };
+
+                  dynamoDB.put(params, (err, data) => {
+                    if (err) {
+                      console.error('Error putting item to DynamoDB:', err);
+                    } else {
+                      console.log(`Item put to DynamoDB - ProjectID : ${that.id}`);
+                    }
+                  });
+                }
+
+                dynamoDB.get(getItemParams, (err, data) => {
+                  if (err) {
+                    console.error('Error retrieving project:', err);
+                  } else {
+                    const item = data.Item;
+                    if (item) {
+                      // Item with the specified key exists in the table
+                      console.log('Project exists:', item);
+                    } else {
+                      // Item with the specified key does not exist in the table
+                      console.log('Project does not exist. Create new Record');
+                      toggleCreate(this)
+                    }
+                  }
+                });
+
+                var io = {
+                  source: this.items,
+                  sink: pull.drain(
+                    (x) => {
+                      // Push data to DynamoDB
+                      const params = {
+                        TableName: 'Record',
+                        Key: {
+                          ProjectId: this.id,
+                        },
+                        UpdateExpression: "SET #myOutput = list_append(#myOutput, :newOutput)",
+                        ExpressionAttributeNames: {
+                          '#myOutput': 'Output'
+                        },
+                        ExpressionAttributeValues: {
+                          ":newOutput": [Number(x)],
+                        },
+                      };
+
+                      dynamoDB.update(params, (err, data) => {
+                        if (err) {
+                          console.error('Error putting item to DynamoDB:', err);
+                        } else {
+                          console.log(`Item put to DynamoDB - ProjectID : ${this.id}`);
+                        }
+                      })
+                    },
+                    function (err) {
+                      log("drain:done(" + err + ")");
+                      if (err) {
+                        console.error(err.message);
+                        console.error(err);
+                        close();
+                        process.exit(1);
+                      } else {
+                        close();
+                        process.exit(0);
+                      }
+                    }
+                  ),
+                };
+                
+
+              pull(
+                io,
+                pull.through(log),
+                probe("pando:input"),
+                this.processor,
+                probe("pando:result"),
+                pull.through(log),
+                io
+              );
+            }
+          );
+        });
+    };
+  }
 }
 
 portfinder.getPort(function (err, port) {
@@ -381,6 +449,7 @@ portfinder.getPort(function (err, port) {
 
   const projectA = new Project({
     port,
+    id: "example0",
     module: "examples/square.js",
     items: [1, 2, 3, 4, 5, 6, 7, 8, 9],
   });
@@ -393,18 +462,7 @@ portfinder.getPort(function (err, port) {
 
   const projectA = new Project({
     port,
-    module: "examples/square.js",
-    items: [100, 200, 300, 400, 500, 600, 700, 800, 900],
-  });
-
-  projectA.start();
-});
-
-portfinder.getPort(function (err, port) {
-  if (err) throw err;
-
-  const projectA = new Project({
-    port,
+    id: "example1",
     module: "examples/square.js",
     items: [100, 200, 300, 400, 500, 600, 700, 800, 900],
   });
