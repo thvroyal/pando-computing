@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+require('dotenv').config()
 var pull = require("pull-stream");
 var debug = require("debug");
 var log = debug("pando-computing");
@@ -85,7 +86,7 @@ class Project {
     this.wsVolunteersStatus = {};
     // this.module = "examples/square.js";
 
-    var wrtc = electronWebRTC({ headless: true });
+    var wrtc = electronWebRTC({ headless: process.env.HEADLESS || false });
     this.start = () => {
       const _this = this;
 
