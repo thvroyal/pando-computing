@@ -5,6 +5,7 @@ var portfinder = require("portfinder");
 const { Project } = require("../bin/index");
 const AWS = require("aws-sdk");
 var allSettled = require("promise.allsettled");
+const log = require('debug')('pando-server');
 
 const app = express();
 app.use(express.json()); // Middleware to parse JSON bodies
