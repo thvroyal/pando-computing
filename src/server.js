@@ -1,17 +1,37 @@
 require('dotenv').config()
-var express = require("express");
 // var cors = require('cors')
 var portfinder = require("portfinder");
 const { Project } = require("../bin/index");
 const AWS = require("aws-sdk");
 var allSettled = require("promise.allsettled");
-const log = require('debug')('pando-server');
+const grpc = require('grpc');
+const protoLoader = require('@grpc/proto-loader');
+const path = require('path');
 
-const app = express();
-app.use(express.json()); // Middleware to parse JSON bodies
-app.use(express.urlencoded({ extended: true })); // Middleware to parse URL-encoded bodies
+const PROTO_PATH = path.join(__dirname, '/distributor.proto');
 
-const allowedIPs = ["::ffff:127.0.0.1"];
+const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
+  keepCase: true,
+  longs: String,
+  enums: String,
+  defaults: true,
+  oneofs: true,
+});
+
+const clientProto = grpc.loadPackageDefinition(packageDefinition).io.mark.grpc.grpcChat;
+
+const gRPClient = new clientProto.MyService('localhost:50051', grpc.credentials.createInsecure());
+
+const metadata = new grpc.Metadata();
+metadata.add('worker', 'pando-1');
+const distributorCall = gRPClient.RunProject(metadata);
+
+// gRPClient.Ping({}, metadata, (error, response) => {
+//   if (error || response.status !== 200) {
+//     throw new Error('Failed to connect with distributor-service. Please try again!');
+//   }
+//   console.log(response.msg);
+// });
 
 function getInput(projectID) {
   const s3 = new AWS.S3();
@@ -66,20 +86,6 @@ function getInput(projectID) {
   });
 }
 
-// Middleware to check request IP against the allowed IPs
-const checkIP = (req, res, next) => {
-  const requestIP =
-    req.headers["x-forwarded-for"] || req.connection.remoteAddress;
-
-  // Check if the requestlistInput IP is in the allowed IPs
-  // if (!allowedIPs.includes(requestIP)) {
-  //   return res.status(403).json({ message: 'Forbidden' });
-  // }
-
-  // If IP is allowed, proceed with the request
-  next();
-};
-
 const run = (projectID, input, callback) => {
   portfinder.getPort(function (err, port) {
     if (err) throw err;
@@ -97,31 +103,29 @@ const run = (projectID, input, callback) => {
   });
 };
 
-app.post("/api/createProject", checkIP, (req, res) => {
-  projectID = req.body.projectID;
-
-  getInput(projectID)
-    .then((inputList) => {
-      input = inputList["input.txt"];
-
-      // Call the run function and pass a callback function
-      run(projectID, input, (port) => {
-        // Send back the port as the response
-        res.send({ port: port });
-      });
-    })
-    .catch((error) => {
-      // Handle any errors that occur during the getInput operation
-      console.log("Error:", error);
-      res
-        .status(500)
-        .send({ error: "An error occurred while fetching input data." });
+distributorCall.on('data', (project) => {
+  console.log(project);
+  const { id } = project;
+  
+  getInput(id).then((inputList) => {
+    input = inputList["input.txt"];
+    
+    // Call the run function and pass a callback function
+    run(id, input, (port) => {
+      // Send back the port as the response
+      distributorCall.write({ status: 200, port, msg: 'Created project successfully'})
     });
-});
+  })
+  .catch((error) => {
+    // Handle any errors that occur during the getInput operation
+    console.log("Error:", error);
+    res
+      .status(500)
+      .send({ error: "An error occurred while fetching input data." });
+  })
+})
 
-app.listen(5500, () => {
-  console.log(`Server is running on http://localhost:5500`);
-  console.log(
-    "create new project with: http://localhost:5500/api/createProject"
-  );
+distributorCall.on('end', () => {
+  // Server has ended the stream
+  console.log('Server closed the stream');
 });
