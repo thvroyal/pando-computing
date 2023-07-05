@@ -20,7 +20,7 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
 
 const clientProto = grpc.loadPackageDefinition(packageDefinition).io.mark.grpc.grpcChat;
 
-const gRPClient = new clientProto.MyService('localhost:50051', grpc.credentials.createInsecure());
+const gRPClient = new clientProto.MyService(process.env.DISTRIBUTOR_HOST, grpc.credentials.createInsecure());
 
 const metadata = new grpc.Metadata();
 metadata.add('worker', 'pando-1');
