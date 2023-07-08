@@ -8,7 +8,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/server.js",
-    "postinstall": "browserify -g uglifyify src/browser.js -r -s volunteer -o public/volunteer.js; browserify src/plotly.js -r -s plotly -o root/plotly.js",
+    "generate-volunteer": "browserify -g uglifyify src/browser.js -r -s volunteer -o public/volunteer.js; browserify src/plotly.js -r -s plotly -o root/plotly.js",
     "test": "tape test/index.js"
   },
   "repository": {

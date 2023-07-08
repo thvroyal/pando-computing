@@ -42,11 +42,20 @@ module.exports['webrtc'] = function (host, bundle, config) {
   return processor
 }
 
+function getLog(message, info = 'info') {
+  return {
+    timestamp: new Date().getTime(),
+    info,
+    message,
+  }
+};
+
 module.exports['websocket'] = function (host, bundle) {
   var socket = new Socket(host)
   var processor = EE({})
 
   processor.close = function () {
+    processor.emit('log', getLog(`Processor will be closed!`));
     processor.emit('close')
     log('closing')
   }
@@ -54,24 +63,30 @@ module.exports['websocket'] = function (host, bundle) {
   socket
     .on('connect', function () {
       processor.emit('ready')
+      processor.emit('log', getLog(`Starting processing project`));
       log('starting processing')
     })
     .on('data', function (x) {
-      processor.emit('input', x)
+      processor.emit('log', getLog(`Processing new input: ${x}`))
       log('processing input: ' + x)
       setTimeout(function () {
         bundle['/pando/1.0.0'](x, function (err, x) {
-          if (err) return socket.destroy()
-          processor.emit('output', x)
+          if (err) {
+            processor.emit('log', getLog(err, 'error'));
+            return socket.destroy()
+          }
           socket.send(zlib.gzipSync(Buffer.from(String(x))).toString('base64'))
+          processor.emit('log', getLog(`Finish process input. The result: ${x}`));
         })
       }, 0)
     })
     .on('close', function () {
+      processor.emit('log', getLog(`Processor will be closed!`));
       processor.close()
     })
     .on('error', function (err) {
       log('error: ' + err)
+      processor.emit('log', getLog(err, 'error'));
       processor.emit('error', err)
     })
 
