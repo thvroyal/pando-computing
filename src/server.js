@@ -7,6 +7,7 @@ var allSettled = require("promise.allsettled");
 const grpc = require('grpc');
 const protoLoader = require('@grpc/proto-loader');
 const path = require('path');
+const http = require('http')
 
 const PROTO_PATH = path.join(__dirname, '/distributor.proto');
 
@@ -17,6 +18,25 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
   defaults: true,
   oneofs: true,
 });
+
+function getPublicAddress() {
+  return new Promise((resolve, reject) => {
+    http.get('http://checkip.amazonaws.com', (res) => {
+      let publicAddress = '';
+      res.on('data', (chunk) => {
+        publicAddress += chunk;
+      });
+      
+      res.on('end', () => {
+        resolve(publicAddress)
+      })
+      
+      res.on('error', (err) => {
+        reject(err)
+      })
+    })
+  })
+}
 
 const clientProto = grpc.loadPackageDefinition(packageDefinition).io.mark.grpc.grpcChat;
 
@@ -111,9 +131,10 @@ distributorCall.on('data', (project) => {
     input = inputList["input.txt"];
     
     // Call the run function and pass a callback function
-    run(id, input, (port) => {
+    run(id, input, async (port) => {
       // Send back the port as the response
-      distributorCall.write({ status: 200, port, msg: 'Created project successfully'})
+      const host = await getPublicAddress();
+      distributorCall.write({ status: 200, host, port, msg: 'Created project successfully'})
     });
   })
   .catch((error) => {
