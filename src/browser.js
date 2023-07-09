@@ -59,6 +59,11 @@ module.exports['websocket'] = function (host, bundle) {
     processor.emit('close')
     log('closing')
   }
+  
+  processor.terminate = function () {
+    processor.close();
+    socket.destroy(['Connection be terminated']);
+  }
 
   socket
     .on('connect', function () {
@@ -75,13 +80,17 @@ module.exports['websocket'] = function (host, bundle) {
             processor.emit('log', getLog(err, 'error'));
             return socket.destroy()
           }
-          socket.send(zlib.gzipSync(Buffer.from(String(x))).toString('base64'))
-          processor.emit('log', getLog(`Finish process input. The result: ${x}`));
+          try {
+            socket.send(zlib.gzipSync(Buffer.from(String(x))).toString('base64'))
+            processor.emit('log', getLog(`Finish process input. The result: ${x}`));
+          } catch (error) {
+            console.log(error)
+          }
         })
       }, 0)
     })
     .on('close', function () {
-      processor.emit('log', getLog(`Processor will be closed!`));
+      processor.emit('log', getLog(`Disconnected!`));
       processor.close()
     })
     .on('error', function (err) {
