@@ -84,6 +84,7 @@ class Project {
     this.syncStdio = syncStdio;
     this.statusSocket = null;
     this.wsVolunteersStatus = {};
+    this.id = projectID
     // this.module = "examples/square.js";
 
     var wrtc = electronWebRTC({ headless: process.env.HEADLESS || false });
@@ -329,6 +330,7 @@ class Project {
                   console.error(err);
                   close();
                 } else {
+                  console.log(`${_this.id} is done`)
                   close();
                 }
               }
@@ -351,6 +353,14 @@ class Project {
         }
       );
     };
+    
+    this.close = () => {
+      if (this.server) {
+        this.server.close();
+      }
+      if (wrtc) wrtc.close();
+      if (this.processor) this.processor.close();
+    }
   }
 }
 
