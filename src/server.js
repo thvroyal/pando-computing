@@ -20,7 +20,7 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
 let client = null;
 let isConnected = false;
 
-const clientProto = grpc.loadPackageDefinition(packageDefinition).io.mark.grpc.grpcChat;
+const clientProto = grpc.loadPackageDefinition(packageDefinition).compute_engine;
 const metadata = new grpc.Metadata().add('worker', 'pando-1');
 
 const run = (projectID, input, callback) => {
@@ -34,6 +34,7 @@ const run = (projectID, input, callback) => {
       items: input,
       projectID: projectID,
     });
+    
     project.start();
     // Pass the port value to the callback function
     callback(port);
@@ -52,7 +53,7 @@ function createClient() {
       scheduleReconnect();
       return;
     }
-    const call = client.RunProject(metadata);
+    const call = client.runProject(metadata);
     
     call.on('error', (error) => {
       console.error('Connection to gRPC server closed! Trying to connect again...');
@@ -75,6 +76,21 @@ function createClient() {
       
       getInput(id).then((inputList) => {
         input = inputList["input.txt"];
+        Project.prototype.addOutput = function(bucketId, value) {
+          try {
+            client.addOutput({
+              value,
+              createdAt: new Date().toISOString(),
+              bucketId
+            }, (error) => {
+              if (error) {
+                console.error(error);
+              }
+            })
+          } catch (error) {
+            console.error(error.message);
+          }
+        }
         run(id, input, async (port) => {
           const host = await getPublicAddress();
           call.write({ status: 200, host, port, msg: 'Created project successfully'})

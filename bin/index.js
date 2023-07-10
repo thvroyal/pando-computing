@@ -46,6 +46,7 @@ function getIPAddresses() {
   return addresses;
 }
 
+var wrtc = electronWebRTC({ headless: process.env.HEADLESS || false });
 class Project {
   constructor({
     port,
@@ -86,76 +87,36 @@ class Project {
     this.wsVolunteersStatus = {};
     this.id = projectID
     // this.module = "examples/square.js";
+  }
+  
+  start() {
+    const _this = this;
 
-    var wrtc = electronWebRTC({ headless: process.env.HEADLESS || false });
-    this.start = () => {
-      const _this = this;
+    log("creating bootstrap server");
+    var publicDir = path.join(__dirname, "../local-server/public");
+    // var publicDir = path.join(__dirname, "../testLocal");
+    mkdirp.sync(publicDir);
+    this.server = new Server({
+      secret: this.secret,
+      publicDir: publicDir,
+      port: this.port,
+      seed: this.seed,
+    });
+    this.host = "localhost:" + this.port;
 
-      log("creating bootstrap server");
-      var publicDir = path.join(__dirname, "../local-server/public");
-      // var publicDir = path.join(__dirname, "../testLocal");
-      mkdirp.sync(publicDir);
-      this.server = new Server({
-        secret: this.secret,
-        publicDir: publicDir,
-        port: this.port,
-        seed: this.seed,
-      });
-      this.host = "localhost:" + this.port;
-
-      this.server._bootstrap.upgrade("/volunteer", (ws) => {
-        if (this.processor) {
-          log("volunteer connected over WebSocket");
-
-          ws.isAlive = true;
-          var heartbeat = setInterval(function ping() {
-            if (ws.isAlive === false) {
-              logHeartbeat("ws: volunteer connection lost");
-              return ws.terminate();
-            }
-            ws.isAlive = false;
-            ws.ping(function () {});
-          }, this.heartbeat);
-          ws.addEventListener("close", function () {
-            clearInterval(heartbeat);
-            heartbeat = null;
-          });
-          ws.addEventListener("error", function () {
-            clearInterval(heartbeat);
-            heartbeat = null;
-          });
-          ws.addEventListener("pong", function () {
-            logHeartbeat("ws: volunteer connection pong");
-            ws.isAlive = true;
-          });
-
-          this.processor.lendStream(function (err, stream) {
-            if (err) return log("error lender sub-stream to volunteer: " + err);
-            log("lending sub-stream to volunteer");
-
-            pull(
-              stream,
-              probe("volunteer-input"),
-              limit(duplexWs(ws), _this.batchSize),
-              probe("volunteer-output"),
-              stream
-            );
-          });
-        }
-      });
-
-      this.server._bootstrap.upgrade("/volunteer-monitoring", (ws) => {
-        log("volunteer monitoring connected over WebSocket");
+    this.server._bootstrap.upgrade("/volunteer", (ws) => {
+      if (this.processor) {
+        log("volunteer connected over WebSocket");
 
         ws.isAlive = true;
         var heartbeat = setInterval(function ping() {
           if (ws.isAlive === false) {
-            logHeartbeat("ws: volunteer monitoring connection lost");
+            logHeartbeat("ws: volunteer connection lost");
             return ws.terminate();
           }
           ws.isAlive = false;
           ws.ping(function () {});
-        }, args.heartbeat);
+        }, this.heartbeat);
         ws.addEventListener("close", function () {
           clearInterval(heartbeat);
           heartbeat = null;
@@ -165,203 +126,246 @@ class Project {
           heartbeat = null;
         });
         ws.addEventListener("pong", function () {
-          logHeartbeat("ws: volunteer monitoring pong");
+          logHeartbeat("ws: volunteer connection pong");
           ws.isAlive = true;
         });
 
-        var id = null;
-        var lastReportTime = new Date();
-        pull(
-          duplexWs.source(ws),
-          pull.drain(
-            function (data) {
-              var info = JSON.parse(data);
-              id = info.id;
-              var time = new Date();
-              this.wsVolunteersStatus[info.id] = {
-                id: info.id,
-                timestamp: time,
-                lastReportInterval: time - lastReportTime,
-                performance: info,
-              };
-              lastReportTime = time;
-            },
-            function () {
-              if (id) {
-                delete this.wsVolunteersStatus[id];
-              }
-            }
-          )
-        );
-      });
-
-      getIPAddresses().forEach((addr) => {
-        console.error(
-          "Serving volunteer code at http://" + addr + ":" + this.port
-        );
-      });
-
-      log("Serializing configuration for workers");
-      fs.writeFileSync(
-        path.join(__dirname, "../public/config.js"),
-        "window.pando = { config: " +
-          JSON.stringify({
-            batchSize: this.batchSize,
-            degree: this.degree,
-            globalMonitoring: this.globalMonitoring,
-            iceServers: this.iceServers,
-            reportingInterval: this.reportingInterval * 1000,
-            requestTimeoutInMs: this.bootstrapTimeout * 1000,
-            version: "1.0.0",
-          }) +
-          " }"
-      );
-
-      log("Uploading files to " + this.host + " with secret " + this.secret);
-      website.upload(
-        [
-          // bundlePath,
-          path.join(__dirname, "../src/parse.js"),
-          path.join(__dirname, "../public/config.js"),
-          path.join(__dirname, "../public/index.html"),
-          path.join(__dirname, "../public/volunteer.js"),
-          path.join(__dirname, "../public/simplewebsocket.min.js"),
-          path.join(
-            __dirname,
-            "../node_modules/bootstrap/dist/css/bootstrap.min.css"
-          ),
-          path.join(
-            __dirname,
-            "../node_modules/bootstrap/dist/js/bootstrap.min.js"
-          ),
-          path.join(__dirname, "../node_modules/jquery/jquery.min.js"),
-          path.join(
-            __dirname,
-            "../node_modules/popper.js/dist/umd/popper.min.js"
-          ),
-        ],
-        this.host,
-        this.secret,
-        (err) => {
-          if (err) throw err;
-          log("files uploaded successfully");
-
-          log("connecting to bootstrap server");
-          var bootstrap = new BootstrapClient(this.host);
-
-          log("creating root node");
-          var root = new Node(bootstrap, {
-            requestTimeoutInMs: this.bootstrapTimeout * 1000, // ms
-            peerOpts: {
-              wrtc: wrtc,
-              config: { iceServers: this.iceServers },
-            },
-            maxDegree: this.degree,
-          }).becomeRoot(this.secret);
-
-          this.processor = createProcessor(root, {
-            batchSize: this.batchSize,
-            bundle: !this.startIdle
-              ? require(bundlePath)["/pando/1.0.0"]
-              : function (x, cb) {
-                  console.error(
-                    "Internal error, bundle should not have been executed"
-                  );
-                },
-            globalMonitoring: this.globalMonitoring,
-            reportingInterval: this.reportingInterval * 1000, // ms
-            startProcessing: !this.startIdle,
-          });
-
-          this.processor.on("status", function (rootStatus) {
-            var volunteers = {};
-
-            // Adding volunteers connected over WebSockets
-            for (var id in _this.wsVolunteersStatus) {
-              volunteers[id] = _this.wsVolunteersStatus[id];
-            }
-
-            // Adding volunteers connected over WebRTC
-            for (var id in rootStatus.children) {
-              volunteers[id] = rootStatus.children[id];
-            }
-
-            var status = JSON.stringify({
-              root: rootStatus,
-              volunteers: volunteers,
-              timestamp: new Date(),
-            });
-
-            logMonitoring(status);
-            logMonitoringChildren(
-              "children nb: " +
-                rootStatus.childrenNb +
-                " leaf nb: " +
-                rootStatus.nbLeafNodes
-            );
-
-            if (_this.statusSocket) {
-              log("sending status to monitoring page");
-              _this.statusSocket.send(status);
-            }
-          });
-
-          const close = () => {
-            log("closing");
-            if (this.server) {
-              this.server.close();
-            }
-            if (root) root.close();
-            if (bootstrap) bootstrap.close();
-            if (wrtc) wrtc.close();
-            if (this.processor) this.processor.close();
-          };
-
-          var io = {
-            source: this.items,
-            sink: pull.drain(
-              function (x) {
-                process.stdout.write(String(x) + "\n");
-              },
-              function (err) {
-                log("drain:done(" + err + ")");
-                if (err) {
-                  console.error(err.message);
-                  console.error(err);
-                  close();
-                } else {
-                  console.log(`${_this.id} is done`)
-                  close();
-                }
-              }
-            ),
-          };
-
-          if (this.syncStdio) {
-            io = sync(io);
-          }
+        this.processor.lendStream(function (err, stream) {
+          if (err) return log("error lender sub-stream to volunteer: " + err);
+          log("lending sub-stream to volunteer");
 
           pull(
-            io,
-            pull.through(log),
-            probe("pando:input"),
-            this.processor,
-            probe("pando:result"),
-            pull.through(log),
-            io
+            stream,
+            probe("volunteer-input"),
+            limit(duplexWs(ws), _this.batchSize),
+            probe("volunteer-output"),
+            stream
           );
-        }
-      );
-    };
-    
-    this.close = () => {
-      if (this.server) {
-        this.server.close();
+        });
       }
-      if (wrtc) wrtc.close();
-      if (this.processor) this.processor.close();
+    });
+
+    this.server._bootstrap.upgrade("/volunteer-monitoring", (ws) => {
+      log("volunteer monitoring connected over WebSocket");
+
+      ws.isAlive = true;
+      var heartbeat = setInterval(function ping() {
+        if (ws.isAlive === false) {
+          logHeartbeat("ws: volunteer monitoring connection lost");
+          return ws.terminate();
+        }
+        ws.isAlive = false;
+        ws.ping(function () {});
+      }, args.heartbeat);
+      ws.addEventListener("close", function () {
+        clearInterval(heartbeat);
+        heartbeat = null;
+      });
+      ws.addEventListener("error", function () {
+        clearInterval(heartbeat);
+        heartbeat = null;
+      });
+      ws.addEventListener("pong", function () {
+        logHeartbeat("ws: volunteer monitoring pong");
+        ws.isAlive = true;
+      });
+
+      var id = null;
+      var lastReportTime = new Date();
+      pull(
+        duplexWs.source(ws),
+        pull.drain(
+          function (data) {
+            var info = JSON.parse(data);
+            id = info.id;
+            var time = new Date();
+            this.wsVolunteersStatus[info.id] = {
+              id: info.id,
+              timestamp: time,
+              lastReportInterval: time - lastReportTime,
+              performance: info,
+            };
+            lastReportTime = time;
+          },
+          function () {
+            if (id) {
+              delete this.wsVolunteersStatus[id];
+            }
+          }
+        )
+      );
+    });
+
+    getIPAddresses().forEach((addr) => {
+      console.error(
+        "Serving volunteer code at http://" + addr + ":" + this.port
+      );
+    });
+
+    log("Serializing configuration for workers");
+    fs.writeFileSync(
+      path.join(__dirname, "../public/config.js"),
+      "window.pando = { config: " +
+        JSON.stringify({
+          batchSize: this.batchSize,
+          degree: this.degree,
+          globalMonitoring: this.globalMonitoring,
+          iceServers: this.iceServers,
+          reportingInterval: this.reportingInterval * 1000,
+          requestTimeoutInMs: this.bootstrapTimeout * 1000,
+          version: "1.0.0",
+        }) +
+        " }"
+    );
+
+    log("Uploading files to " + this.host + " with secret " + this.secret);
+    website.upload(
+      [
+        // bundlePath,
+        path.join(__dirname, "../src/parse.js"),
+        path.join(__dirname, "../public/config.js"),
+        path.join(__dirname, "../public/index.html"),
+        path.join(__dirname, "../public/volunteer.js"),
+        path.join(__dirname, "../public/simplewebsocket.min.js"),
+        path.join(
+          __dirname,
+          "../node_modules/bootstrap/dist/css/bootstrap.min.css"
+        ),
+        path.join(
+          __dirname,
+          "../node_modules/bootstrap/dist/js/bootstrap.min.js"
+        ),
+        path.join(__dirname, "../node_modules/jquery/jquery.min.js"),
+        path.join(
+          __dirname,
+          "../node_modules/popper.js/dist/umd/popper.min.js"
+        ),
+      ],
+      this.host,
+      this.secret,
+      (err) => {
+        if (err) throw err;
+        log("files uploaded successfully");
+
+        log("connecting to bootstrap server");
+        var bootstrap = new BootstrapClient(this.host);
+
+        log("creating root node");
+        var root = new Node(bootstrap, {
+          requestTimeoutInMs: this.bootstrapTimeout * 1000, // ms
+          peerOpts: {
+            wrtc: wrtc,
+            config: { iceServers: this.iceServers },
+          },
+          maxDegree: this.degree,
+        }).becomeRoot(this.secret);
+
+        this.processor = createProcessor(root, {
+          batchSize: this.batchSize,
+          bundle: !this.startIdle
+            ? require(bundlePath)["/pando/1.0.0"]
+            : function (x, cb) {
+                console.error(
+                  "Internal error, bundle should not have been executed"
+                );
+              },
+          globalMonitoring: this.globalMonitoring,
+          reportingInterval: this.reportingInterval * 1000, // ms
+          startProcessing: !this.startIdle,
+        });
+
+        this.processor.on("status", function (rootStatus) {
+          var volunteers = {};
+
+          // Adding volunteers connected over WebSockets
+          for (var id in _this.wsVolunteersStatus) {
+            volunteers[id] = _this.wsVolunteersStatus[id];
+          }
+
+          // Adding volunteers connected over WebRTC
+          for (var id in rootStatus.children) {
+            volunteers[id] = rootStatus.children[id];
+          }
+
+          var status = JSON.stringify({
+            root: rootStatus,
+            volunteers: volunteers,
+            timestamp: new Date(),
+          });
+
+          logMonitoring(status);
+          logMonitoringChildren(
+            "children nb: " +
+              rootStatus.childrenNb +
+              " leaf nb: " +
+              rootStatus.nbLeafNodes
+          );
+
+          if (_this.statusSocket) {
+            log("sending status to monitoring page");
+            _this.statusSocket.send(status);
+          }
+        });
+
+        const close = () => {
+          log("closing");
+          if (this.server) {
+            this.server.close();
+          }
+          if (root) root.close();
+          if (bootstrap) bootstrap.close();
+          if (wrtc) wrtc.close();
+          if (this.processor) this.processor.close();
+        };
+
+        var io = {
+          source: this.items,
+          sink: pull.drain(
+            function (x) {
+              _this.addOutput(_this.id, x);
+            },
+            function (err) {
+              log("drain:done(" + err + ")");
+              if (err) {
+                console.error(err.message);
+                console.error(err);
+                close();
+              } else {
+                console.log(`${_this.id} is done`)
+                close();
+              }
+            }
+          ),
+        };
+
+        if (this.syncStdio) {
+          io = sync(io);
+        }
+
+        pull(
+          io,
+          pull.through(log),
+          probe("pando:input"),
+          this.processor,
+          probe("pando:result"),
+          pull.through(log),
+          io
+        );
+      }
+    );
+  };
+  
+  close() {
+    if (this.server) {
+      this.server.close();
     }
+    if (wrtc) wrtc.close();
+    if (this.processor) this.processor.close();
   }
+}
+
+Project.prototype.addOutput = function(bucketId, value) {
+  process.stdout.write(String(value) + "\n");
 }
 
 module.exports = {
@@ -369,44 +373,3 @@ module.exports = {
   Project,
 };
 
-// const allowedIPs = ['1::1'];
-
-// // Middleware to check request IP against the allowed IPs
-// const checkIP = (req, res, next) => {
-//   const requestIP = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
-
-//   // Check if the request IP is in the allowed IPs
-//   if (!allowedIPs.includes(requestIP)) {
-//     return res.status(403).json({ message: 'Forbidden' });
-//   }
-
-//   // If IP is allowed, proceed with the request
-//   next();
-// };
-
-// const run = (calcreateProcessorlback) => {
-//   portfinder.getPort(function (err, port) {
-//     if (err) throw err;
-
-//     const project = new Project({
-//       port,
-//       module: "examples/square-no-delay.js",
-//       items: [1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-//     })
-//     project.start();
-//     // Pass the port value to the callback function
-//     callback(port);
-//   });
-// }
-
-// app.get('/number', checkIP, (req, res) => {
-//   // Call the run function and pass a callback function
-//   run((port) => {
-//     // Send back the port as the response
-//     res.send(`The port is: ${port}`);
-//   });
-// });
-
-// app.listen(3000, () => {
-//   console.log(`Server is running on port `)
-// });
