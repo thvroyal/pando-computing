@@ -30,7 +30,7 @@ module.exports['webrtc'] = function (host, bundle, config) {
   })
 
   var closed = false
-  function close () {
+  function close() {
     if (closed) return
     closed = true
 
@@ -59,7 +59,7 @@ module.exports['websocket'] = function (host, bundle) {
     processor.emit('close')
     log('closing')
   }
-  
+
   processor.terminate = function () {
     processor.close();
     socket.destroy(['Connection be terminated']);
@@ -74,6 +74,7 @@ module.exports['websocket'] = function (host, bundle) {
     .on('data', function (x) {
       processor.emit('log', getLog(`Processing new input: ${x}`))
       log('processing input: ' + x)
+      startTime = new Date().getTime()
       setTimeout(function () {
         bundle['/pando/1.0.0'](x, function (err, x) {
           if (err) {
@@ -82,6 +83,7 @@ module.exports['websocket'] = function (host, bundle) {
           }
           try {
             socket.send(zlib.gzipSync(Buffer.from(String(x))).toString('base64'))
+            processor.emit('deltaTime', new Date().getTime() - startTime)
             processor.emit('log', getLog(`Finish process input. The result: ${x}`));
           } catch (error) {
             console.log(error)

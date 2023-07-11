@@ -34,7 +34,7 @@ const run = (projectID, input, callback) => {
       items: input,
       projectID: projectID,
     });
-    
+
     project.start();
     // Pass the port value to the callback function
     callback(port);
@@ -43,10 +43,10 @@ const run = (projectID, input, callback) => {
 
 function createClient() {
   client = new clientProto.MyService(process.env.DISTRIBUTOR_HOST, grpc.credentials.createInsecure());
-  
+
   const deadline = new Date();
   deadline.setSeconds(deadline.getSeconds() + 5);
-  
+
   client.waitForReady(deadline, (error) => {
     if (error) {
       console.log(error);
@@ -54,29 +54,29 @@ function createClient() {
       return;
     }
     const call = client.runProject(metadata);
-    
+
     call.on('error', (error) => {
       console.error('Connection to gRPC server closed! Trying to connect again...');
       isConnected = false;
       scheduleReconnect();
     });
-    
+
     call.on('end', () => {
       console.log('Connection to gRPC server closed! Trying to connect again...');
       isConnected = false;
       scheduleReconnect();
     });
-    
+
     isConnected = true;
     console.log('Connected to gRPC server');
-    
+
     call.on('data', (project) => {
       const { id } = project;
       console.log(`New project will be created: ${id}`);
-      
+
       getInput(id).then((inputList) => {
         input = inputList["input.txt"];
-        Project.prototype.addOutput = function(bucketId, value) {
+        Project.prototype.addOutput = function (bucketId, value) {
           try {
             client.addOutput({
               value,
@@ -91,14 +91,27 @@ function createClient() {
             console.error(error.message);
           }
         }
+        Project.prototype.UpdateStatusProject = function (data) {
+          try {
+            client.updateStatusProject({
+              data
+            }, (error) => {
+              if (error) {
+                console.error(error);
+              }
+            })
+          } catch (error) {
+            console.error(error.message);
+          }
+        }
         run(id, input, async (port) => {
           const host = await getPublicAddress();
-          call.write({ status: 200, host, port, msg: 'Created project successfully'})
+          call.write({ status: 200, host, port, msg: 'Created project successfully' })
         });
       })
-      .catch((error) => {
-        console.log("Error:", error);
-      })
+        .catch((error) => {
+          console.log("Error:", error);
+        })
     })
   })
 }
