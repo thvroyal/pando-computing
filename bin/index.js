@@ -73,7 +73,6 @@ class Project {
     this.host = null;
     this.wsVolunteersStatus = {};
     this.statusSocket = null;
-    // this.module = path.join(process.cwd(), module);
     this.secret = secret;
     this.seed = seed;
     this.heartbeat = heartbeat;
@@ -86,11 +85,7 @@ class Project {
     this.startIdle = true;
     this.items = pull.values(items.map((x) => String(x)));
     this.syncStdio = syncStdio;
-    this.statusSocket = null;
-    this.wsVolunteersStatus = {};
     this.id = projectID
-    this.monitoringPort = port + 1
-    // this.module = "examples/square.js";
   }
 
   start() {
@@ -360,20 +355,6 @@ class Project {
         );
       }
     );
-
-    this.app = express();
-    this.wss = WebSocket.Server({
-      server: http.createServer(this.app).listen(this.monitoringPort),
-    });
-    this.wss.on("connection/root-status", (socket) => {
-      _this.statusSocket = socket;
-      socket.onerror = function () {
-        _this.statusSocket = null;
-      };
-      socket.onclose = function () {
-        _this.statusSocket = null;
-      };
-    });
   };
 
   close() {
