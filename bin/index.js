@@ -20,6 +20,9 @@ var mkdirp = require("mkdirp");
 var sync = require("pull-sync");
 var limit = require("pull-limit");
 var duplexWs = require("pull-ws");
+var express = require('express')
+var http = require("http");
+var WebSocket = require("ws");
 
 function getIPAddresses() {
   var ifaces = os.networkInterfaces();
@@ -70,7 +73,6 @@ class Project {
     this.host = null;
     this.wsVolunteersStatus = {};
     this.statusSocket = null;
-    // this.module = path.join(process.cwd(), module);
     this.secret = secret;
     this.seed = seed;
     this.heartbeat = heartbeat;
@@ -83,12 +85,9 @@ class Project {
     this.startIdle = true;
     this.items = pull.values(items.map((x) => String(x)));
     this.syncStdio = syncStdio;
-    this.statusSocket = null;
-    this.wsVolunteersStatus = {};
     this.id = projectID
-    // this.module = "examples/square.js";
   }
-  
+
   start() {
     const _this = this;
 
@@ -115,7 +114,7 @@ class Project {
             return ws.terminate();
           }
           ws.isAlive = false;
-          ws.ping(function () {});
+          ws.ping(function () { });
         }, this.heartbeat);
         ws.addEventListener("close", function () {
           clearInterval(heartbeat);
@@ -155,8 +154,8 @@ class Project {
           return ws.terminate();
         }
         ws.isAlive = false;
-        ws.ping(function () {});
-      }, args.heartbeat);
+        ws.ping(function () { });
+      }, this.heartbeat);
       ws.addEventListener("close", function () {
         clearInterval(heartbeat);
         heartbeat = null;
@@ -170,26 +169,26 @@ class Project {
         ws.isAlive = true;
       });
 
-      var id = null;
-      var lastReportTime = new Date();
+      // var id = null;
       pull(
         duplexWs.source(ws),
         pull.drain(
           function (data) {
-            var info = JSON.parse(data);
-            id = info.id;
-            var time = new Date();
-            this.wsVolunteersStatus[info.id] = {
-              id: info.id,
-              timestamp: time,
-              lastReportInterval: time - lastReportTime,
-              performance: info,
+            let info = JSON.parse(data);
+            let id = info.userId;
+            let time = new Date();
+
+            _this.wsVolunteersStatus[id] = {
+              id,
+              ...info,
             };
-            lastReportTime = time;
+            _this.UpdateStatusProject(JSON.stringify(_this.wsVolunteersStatus));
+
+            let lastReportTime = time;
           },
           function () {
             if (id) {
-              delete this.wsVolunteersStatus[id];
+              delete _this.wsVolunteersStatus[id];
             }
           }
         )
@@ -206,16 +205,16 @@ class Project {
     fs.writeFileSync(
       path.join(__dirname, "../public/config.js"),
       "window.pando = { config: " +
-        JSON.stringify({
-          batchSize: this.batchSize,
-          degree: this.degree,
-          globalMonitoring: this.globalMonitoring,
-          iceServers: this.iceServers,
-          reportingInterval: this.reportingInterval * 1000,
-          requestTimeoutInMs: this.bootstrapTimeout * 1000,
-          version: "1.0.0",
-        }) +
-        " }"
+      JSON.stringify({
+        batchSize: this.batchSize,
+        degree: this.degree,
+        globalMonitoring: this.globalMonitoring,
+        iceServers: this.iceServers,
+        reportingInterval: this.reportingInterval * 1000,
+        requestTimeoutInMs: this.bootstrapTimeout * 1000,
+        version: "1.0.0",
+      }) +
+      " }"
     );
 
     log("Uploading files to " + this.host + " with secret " + this.secret);
@@ -265,17 +264,17 @@ class Project {
           bundle: !this.startIdle
             ? require(bundlePath)["/pando/1.0.0"]
             : function (x, cb) {
-                console.error(
-                  "Internal error, bundle should not have been executed"
-                );
-              },
+              console.error(
+                "Internal error, bundle should not have been executed"
+              );
+            },
           globalMonitoring: this.globalMonitoring,
           reportingInterval: this.reportingInterval * 1000, // ms
           startProcessing: !this.startIdle,
         });
 
         this.processor.on("status", function (rootStatus) {
-          var volunteers = {};
+          var volunteers = [];
 
           // Adding volunteers connected over WebSockets
           for (var id in _this.wsVolunteersStatus) {
@@ -287,6 +286,8 @@ class Project {
             volunteers[id] = rootStatus.children[id];
           }
 
+          volunteers = volunteers.filter((item) => item !== null);
+
           var status = JSON.stringify({
             root: rootStatus,
             volunteers: volunteers,
@@ -296,13 +297,14 @@ class Project {
           logMonitoring(status);
           logMonitoringChildren(
             "children nb: " +
-              rootStatus.childrenNb +
-              " leaf nb: " +
-              rootStatus.nbLeafNodes
+            rootStatus.childrenNb +
+            " leaf nb: " +
+            rootStatus.nbLeafNodes
           );
 
           if (_this.statusSocket) {
             log("sending status to monitoring page");
+
             _this.statusSocket.send(status);
           }
         });
@@ -354,7 +356,7 @@ class Project {
       }
     );
   };
-  
+
   close() {
     if (this.server) {
       this.server.close();
@@ -364,8 +366,12 @@ class Project {
   }
 }
 
-Project.prototype.addOutput = function(bucketId, value) {
+Project.prototype.addOutput = function (bucketId, value) {
   process.stdout.write(String(value) + "\n");
+}
+
+Project.prototype.UpdateStatusProject = function (data) {
+  process.stdout.write(JSON.stringify(data) + "\n");
 }
 
 module.exports = {
