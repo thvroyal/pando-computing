@@ -93,7 +93,7 @@ function createClient() {
         }
         Project.prototype.UpdateStatusProject = function (data) {
           try {
-            client.updateStatusProject({
+            client.report({
               data
             }, (error) => {
               if (error) {
