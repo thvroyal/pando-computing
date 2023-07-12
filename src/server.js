@@ -91,10 +91,10 @@ function createClient() {
             console.error(error.message);
           }
         }
-        Project.prototype.UpdateStatusProject = function (data) {
+        Project.prototype.reportProjectStatus = function (data, bucketId) {
           try {
             client.report({
-              data
+              data, bucketId
             }, (error) => {
               if (error) {
                 console.error(error);

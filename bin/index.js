@@ -169,7 +169,6 @@ class Project {
         ws.isAlive = true;
       });
 
-      // var id = null;
       pull(
         duplexWs.source(ws),
         pull.drain(
@@ -182,7 +181,7 @@ class Project {
               id,
               ...info,
             };
-            _this.UpdateStatusProject(JSON.stringify(_this.wsVolunteersStatus));
+            _this.reportProjectStatus(JSON.stringify(_this.wsVolunteersStatus), _this.id);
 
             let lastReportTime = time;
           },
@@ -273,41 +272,41 @@ class Project {
           startProcessing: !this.startIdle,
         });
 
-        this.processor.on("status", function (rootStatus) {
-          var volunteers = [];
+        // this.processor.on("status", function (rootStatus) {
+        //   var volunteers = [];
 
-          // Adding volunteers connected over WebSockets
-          for (var id in _this.wsVolunteersStatus) {
-            volunteers[id] = _this.wsVolunteersStatus[id];
-          }
+        //   // Adding volunteers connected over WebSockets
+        //   for (var id in _this.wsVolunteersStatus) {
+        //     volunteers[id] = _this.wsVolunteersStatus[id];
+        //   }
 
-          // Adding volunteers connected over WebRTC
-          for (var id in rootStatus.children) {
-            volunteers[id] = rootStatus.children[id];
-          }
+        //   // Adding volunteers connected over WebRTC
+        //   for (var id in rootStatus.children) {
+        //     volunteers[id] = rootStatus.children[id];
+        //   }
 
-          volunteers = volunteers.filter((item) => item !== null);
+        //   volunteers = volunteers.filter((item) => item !== null);
 
-          var status = JSON.stringify({
-            root: rootStatus,
-            volunteers: volunteers,
-            timestamp: new Date(),
-          });
+        //   var status = JSON.stringify({
+        //     root: rootStatus,
+        //     volunteers: volunteers,
+        //     timestamp: new Date(),
+        //   });
 
-          logMonitoring(status);
-          logMonitoringChildren(
-            "children nb: " +
-            rootStatus.childrenNb +
-            " leaf nb: " +
-            rootStatus.nbLeafNodes
-          );
+        //   logMonitoring(status);
+        //   logMonitoringChildren(
+        //     "children nb: " +
+        //     rootStatus.childrenNb +
+        //     " leaf nb: " +
+        //     rootStatus.nbLeafNodes
+        //   );
 
-          if (_this.statusSocket) {
-            log("sending status to monitoring page");
+        //   if (_this.statusSocket) {
+        //     log("sending status to monitoring page");
 
-            _this.statusSocket.send(status);
-          }
-        });
+        //     _this.statusSocket.send(status);
+        //   }
+        // });
 
         const close = () => {
           log("closing");
@@ -370,8 +369,8 @@ Project.prototype.addOutput = function (bucketId, value) {
   process.stdout.write(String(value) + "\n");
 }
 
-Project.prototype.UpdateStatusProject = function (data) {
-  process.stdout.write(JSON.stringify(data) + "\n");
+Project.prototype.reportProjectStatus = function (data, bucketId) {
+  // process.stdout.write((data) + "\n");
 }
 
 module.exports = {
