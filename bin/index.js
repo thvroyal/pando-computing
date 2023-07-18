@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-require('dotenv').config()
+require("dotenv").config();
 var pull = require("pull-stream");
 var debug = require("debug");
 var log = debug("pando-computing");
@@ -20,7 +20,7 @@ var mkdirp = require("mkdirp");
 var sync = require("pull-sync");
 var limit = require("pull-limit");
 var duplexWs = require("pull-ws");
-var express = require('express')
+var express = require("express");
 var http = require("http");
 var WebSocket = require("ws");
 
@@ -85,7 +85,7 @@ class Project {
     this.startIdle = true;
     this.items = pull.values(items.map((x) => String(x)));
     this.syncStdio = syncStdio;
-    this.id = projectID
+    this.id = projectID;
   }
 
   start() {
@@ -114,7 +114,7 @@ class Project {
             return ws.terminate();
           }
           ws.isAlive = false;
-          ws.ping(function () { });
+          ws.ping(function () {});
         }, this.heartbeat);
         ws.addEventListener("close", function () {
           clearInterval(heartbeat);
@@ -154,7 +154,7 @@ class Project {
           return ws.terminate();
         }
         ws.isAlive = false;
-        ws.ping(function () { });
+        ws.ping(function () {});
       }, this.heartbeat);
       ws.addEventListener("close", function () {
         clearInterval(heartbeat);
@@ -169,19 +169,26 @@ class Project {
         ws.isAlive = true;
       });
 
+      let id = null;
+
       pull(
         duplexWs.source(ws),
         pull.drain(
           function (data) {
             let info = JSON.parse(data);
-            let id = info.userId;
+            id = info.userId;
             let time = new Date();
 
             _this.wsVolunteersStatus[id] = {
               id,
               ...info,
             };
-            _this.reportProjectStatus(JSON.stringify(_this.wsVolunteersStatus), _this.id);
+            console.log(_this.wsVolunteersStatus);
+            delete _this.wsVolunteersStatus[undefined];
+            _this.reportProjectStatus(
+              JSON.stringify(_this.wsVolunteersStatus),
+              _this.id
+            );
 
             let lastReportTime = time;
           },
@@ -204,16 +211,16 @@ class Project {
     fs.writeFileSync(
       path.join(__dirname, "../public/config.js"),
       "window.pando = { config: " +
-      JSON.stringify({
-        batchSize: this.batchSize,
-        degree: this.degree,
-        globalMonitoring: this.globalMonitoring,
-        iceServers: this.iceServers,
-        reportingInterval: this.reportingInterval * 1000,
-        requestTimeoutInMs: this.bootstrapTimeout * 1000,
-        version: "1.0.0",
-      }) +
-      " }"
+        JSON.stringify({
+          batchSize: this.batchSize,
+          degree: this.degree,
+          globalMonitoring: this.globalMonitoring,
+          iceServers: this.iceServers,
+          reportingInterval: this.reportingInterval * 1000,
+          requestTimeoutInMs: this.bootstrapTimeout * 1000,
+          version: "1.0.0",
+        }) +
+        " }"
     );
 
     log("Uploading files to " + this.host + " with secret " + this.secret);
@@ -263,10 +270,10 @@ class Project {
           bundle: !this.startIdle
             ? require(bundlePath)["/pando/1.0.0"]
             : function (x, cb) {
-              console.error(
-                "Internal error, bundle should not have been executed"
-              );
-            },
+                console.error(
+                  "Internal error, bundle should not have been executed"
+                );
+              },
           globalMonitoring: this.globalMonitoring,
           reportingInterval: this.reportingInterval * 1000, // ms
           startProcessing: !this.startIdle,
@@ -332,7 +339,7 @@ class Project {
                 console.error(err);
                 close();
               } else {
-                console.log(`${_this.id} is done`)
+                console.log(`${_this.id} is done`);
                 close();
               }
             }
@@ -354,7 +361,7 @@ class Project {
         );
       }
     );
-  };
+  }
 
   close() {
     if (this.server) {
@@ -367,14 +374,13 @@ class Project {
 
 Project.prototype.addOutput = function (bucketId, value) {
   process.stdout.write(String(value) + "\n");
-}
+};
 
 Project.prototype.reportProjectStatus = function (data, bucketId) {
   // process.stdout.write((data) + "\n");
-}
+};
 
 module.exports = {
   getIPAddresses,
   Project,
 };
-
