@@ -279,46 +279,11 @@ class Project {
           startProcessing: !this.startIdle,
         });
 
-        // this.processor.on("status", function (rootStatus) {
-        //   var volunteers = [];
-
-        //   // Adding volunteers connected over WebSockets
-        //   for (var id in _this.wsVolunteersStatus) {
-        //     volunteers[id] = _this.wsVolunteersStatus[id];
-        //   }
-
-        //   // Adding volunteers connected over WebRTC
-        //   for (var id in rootStatus.children) {
-        //     volunteers[id] = rootStatus.children[id];
-        //   }
-
-        //   volunteers = volunteers.filter((item) => item !== null);
-
-        //   var status = JSON.stringify({
-        //     root: rootStatus,
-        //     volunteers: volunteers,
-        //     timestamp: new Date(),
-        //   });
-
-        //   logMonitoring(status);
-        //   logMonitoringChildren(
-        //     "children nb: " +
-        //     rootStatus.childrenNb +
-        //     " leaf nb: " +
-        //     rootStatus.nbLeafNodes
-        //   );
-
-        //   if (_this.statusSocket) {
-        //     log("sending status to monitoring page");
-
-        //     _this.statusSocket.send(status);
-        //   }
-        // });
-
         const close = () => {
           log("closing");
           if (this.server) {
             this.server.close();
+            _this.reportProjectStatus("error", _this.id);
           }
           if (root) root.close();
           if (bootstrap) bootstrap.close();
