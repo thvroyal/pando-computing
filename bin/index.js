@@ -183,7 +183,7 @@ class Project {
               id,
               ...info,
             };
-            console.log(_this.wsVolunteersStatus);
+            // console.log(_this.wsVolunteersStatus);
             delete _this.wsVolunteersStatus[undefined];
             _this.reportProjectStatus(
               JSON.stringify(_this.wsVolunteersStatus),
@@ -295,7 +295,8 @@ class Project {
           source: this.items,
           sink: pull.drain(
             function (x) {
-              _this.addOutput(_this.id, x);
+              x = JSON.parse(x);
+              _this.addOutput(_this.id, x.output, x.userId, x.totalOutput);
             },
             function (err) {
               log("drain:done(" + err + ")");
@@ -337,7 +338,7 @@ class Project {
   }
 }
 
-Project.prototype.addOutput = function (bucketId, value) {
+Project.prototype.addOutput = function (bucketId, value, user, totalOutput) {
   process.stdout.write(String(value) + "\n");
 };
 
